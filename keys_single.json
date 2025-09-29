@@ -1,0 +1,31 @@
+{
+  "keys": {
+    "cb9fa173dd5b7fd4e129e275e5022e9a": {
+      "key": "WMNwRMOEBKyctM1IY+3hmZxGNX5o9ql673ID+j5bLEU=",
+      "fields": [
+        "linkedin",
+        "email",
+        "skills",
+        "education",
+        "current_position",
+        "name",
+        "professional_summary",
+        "languages",
+        "patents",
+        "phone"
+      ]
+    }
+  },
+  "field_map": {
+    "name": "cb9fa173dd5b7fd4e129e275e5022e9a",
+    "phone": "cb9fa173dd5b7fd4e129e275e5022e9a",
+    "email": "cb9fa173dd5b7fd4e129e275e5022e9a",
+    "linkedin": "cb9fa173dd5b7fd4e129e275e5022e9a",
+    "languages": "cb9fa173dd5b7fd4e129e275e5022e9a",
+    "professional_summary": "cb9fa173dd5b7fd4e129e275e5022e9a",
+    "skills": "cb9fa173dd5b7fd4e129e275e5022e9a",
+    "current_position": "cb9fa173dd5b7fd4e129e275e5022e9a",
+    "patents": "cb9fa173dd5b7fd4e129e275e5022e9a",
+    "education": "cb9fa173dd5b7fd4e129e275e5022e9a"
+  }
+}

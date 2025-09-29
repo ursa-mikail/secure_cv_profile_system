@@ -1,0 +1,70 @@
+{
+  "encrypted_data": {
+    "name": {
+      "nonce": "Osxt6lEjfBLipzD3",
+      "ciphertext": "Mxj2r5ZOudwCL+ppHqz9YeIOqZWvQmRmzg==",
+      "type": "str"
+    },
+    "phone": {
+      "nonce": "fYjlUQrI/DUrtPZ8",
+      "ciphertext": "WPYql7AJoJQSOmBlkdk/dao09LT4x2oIYehmuD7BC+Bk",
+      "type": "str"
+    },
+    "email": {
+      "nonce": "Xx0+z8eqpKt2Lllc",
+      "ciphertext": "2u4Cwc+Dj3z5HPE/BMuTkBvYwLzV4wkdmw0XCDeSnOdTN+EJJ5c=",
+      "type": "str"
+    },
+    "linkedin": {
+      "nonce": "qy0oSVDdjm0nkiPr",
+      "ciphertext": "L4XfUeAwIwAMvCAGb/pHikjVZ9FtcCtg75ca3IRGXkDQE/15HFIFlEUW4+p+Xl28uqbx",
+      "type": "str"
+    },
+    "languages": {
+      "nonce": "Y3GIzGmPeHo038VY",
+      "ciphertext": "rrX0OCh9iORI5aZvDaXRKiWvpr2nv8FFpGT2tAM6amypese3XWsSqe8=",
+      "type": "str"
+    },
+    "professional_summary": {
+      "nonce": "KwSmqpEvk/Wq22h1",
+      "ciphertext": "1OtAynnIE3fGlnNULapv9d0lxUCuzdb2uTP5O1VfR1dra6UTTZWKA4kXzNTBgp25iZWisN9TQQGRooPRQ85n3V0swaWM2OAQc7mZ7viK1X2/lYd59Dd1ZHyvxpIW8OXIpgT6YX+CuN/ydcIljxmpS5AH3q3sVOT8Kg==",
+      "type": "str"
+    },
+    "skills": {
+      "nonce": "9pP0vS5IgzaEVxGs",
+      "ciphertext": "m8d7txVKt+LC+IJ372jnyvxifq/9dzshuYHKm5oZ4UtmlWwX7ninKKjLqfCD1afOETz0SGGcOCQIQgU2Wp7NiMHz9N0agTtNcoNJ0TVrFcNSTzDFRWN8uqop05bw",
+      "type": "str"
+    },
+    "current_position": {
+      "nonce": "8Pbavf9Ge2on4XiK",
+      "ciphertext": "0hkpBVydu9QP8brrYiC50KNeziuevFHi1u8M4S85CkfhjDlWWrRsGuKFaINuaIv8iPuixCMMsE31zau1mETKSxMsJMJcvTF16H5QPT4Lag==",
+      "type": "str"
+    },
+    "patents": {
+      "nonce": "6argD56y/KsyC9jf",
+      "ciphertext": "p/QKqV2gDK2PPinxHJXqbkgESK2Vgh7WmbcA01zYRdGkZJFmgtBuqRV8l9YyxEFIpev53oxXlV7zNYjs11zNkN+BXxVI",
+      "type": "str"
+    },
+    "education": {
+      "nonce": "0ZM/BSOKWvUQJFhk",
+      "ciphertext": "h6y/cNeQqlTecGRqWEKFc3iyO062imRqGZTuuLALm2d5XOWo+i1UcMdDvzTia00cmRT/aQS4GbTVgJDwALzk+haWnqKn5RNH",
+      "type": "str"
+    }
+  },
+  "field_key_map": {
+    "name": "cb9fa173dd5b7fd4e129e275e5022e9a",
+    "phone": "cb9fa173dd5b7fd4e129e275e5022e9a",
+    "email": "cb9fa173dd5b7fd4e129e275e5022e9a",
+    "linkedin": "cb9fa173dd5b7fd4e129e275e5022e9a",
+    "languages": "cb9fa173dd5b7fd4e129e275e5022e9a",
+    "professional_summary": "cb9fa173dd5b7fd4e129e275e5022e9a",
+    "skills": "cb9fa173dd5b7fd4e129e275e5022e9a",
+    "current_position": "cb9fa173dd5b7fd4e129e275e5022e9a",
+    "patents": "cb9fa173dd5b7fd4e129e275e5022e9a",
+    "education": "cb9fa173dd5b7fd4e129e275e5022e9a"
+  },
+  "metadata": {
+    "total_fields": 10,
+    "total_keys": 1
+  }
+}
