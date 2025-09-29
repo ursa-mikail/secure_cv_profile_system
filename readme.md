@@ -64,27 +64,22 @@ The documentation makes it crystal clear that:
 
 ## **DEMO 1: SINGLE KEY MODE**
 
-======================================================================
-
 Loading 10 CV fields in 'single' mode...
 Encrypted 10 fields with 1 keys
 
-======================================================================
+
 KEY CHAIN (1 keys)
-======================================================================
+
 0. cb9fa173dd5b... - ACTIVE [CURRENT]
    Fields: 10 - ['linkedin', 'email', 'skills']
-======================================================================
+
 Saved encrypted CV to encrypted_cv_single.json
 Saved keys to keys_single.json
 
 Total keys: 1
 
-======================================================================
-
 ## **DEMO 2: MULTI-KEY MODE**
 
-======================================================================
 Loading 10 CV fields in 'multi' mode...
 Encrypted 10 fields with 10 keys
 
