@@ -1,0 +1,32 @@
+{
+  "keys": {
+    "055ea8b5736da230": {
+      "key_id": "055ea8b5736da230",
+      "key": "gfK1dNMsHDaHVmgFLHvodTZSV0nG0R4coSVgO2Nn0Qw=",
+      "fields": [
+        "current_position",
+        "education",
+        "email",
+        "languages",
+        "linkedin",
+        "name",
+        "patents",
+        "phone",
+        "professional_summary",
+        "skills"
+      ]
+    }
+  },
+  "field_map": {
+    "current_position": "055ea8b5736da230",
+    "education": "055ea8b5736da230",
+    "email": "055ea8b5736da230",
+    "languages": "055ea8b5736da230",
+    "linkedin": "055ea8b5736da230",
+    "name": "055ea8b5736da230",
+    "patents": "055ea8b5736da230",
+    "phone": "055ea8b5736da230",
+    "professional_summary": "055ea8b5736da230",
+    "skills": "055ea8b5736da230"
+  }
+}

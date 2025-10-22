@@ -1,0 +1,86 @@
+{
+  "keys": {
+    "0adaa3eb0dfd8141": {
+      "key_id": "0adaa3eb0dfd8141",
+      "key": "wQhk4xlqw/D1yyoJ+nVEtkjuFXwNzfV12i3QtX4jbeg=",
+      "fields": [
+        "email"
+      ]
+    },
+    "152ecb6a13ef1795": {
+      "key_id": "152ecb6a13ef1795",
+      "key": "oJt1eDKNXBau4i+6buUFpOK9E6Hjq6S7IIJC4D6BOjk=",
+      "fields": [
+        "education"
+      ]
+    },
+    "22d0150ecbec0778": {
+      "key_id": "22d0150ecbec0778",
+      "key": "C2fwkZAEpxl97e9MdbYGecs7m7q8J0ytTkJM8O6ZsNQ=",
+      "fields": [
+        "linkedin"
+      ]
+    },
+    "607cf70c8d1f2d8b": {
+      "key_id": "607cf70c8d1f2d8b",
+      "key": "0ZnHq2JUutCEDnJsx1WxGX9oIpQDNq2crpApqp61YzU=",
+      "fields": [
+        "current_position"
+      ]
+    },
+    "6225ae8e11d4594b": {
+      "key_id": "6225ae8e11d4594b",
+      "key": "Gp09wAkpLOs4AzgxWMtyigXG6aUt75bUAAXZ3QqSo5E=",
+      "fields": [
+        "name"
+      ]
+    },
+    "9b047bc242bbd08c": {
+      "key_id": "9b047bc242bbd08c",
+      "key": "hjjFWwt0EwFinzcy+kd3Rdnvq7EeDTAKjnsWjLjAxb0=",
+      "fields": [
+        "languages"
+      ]
+    },
+    "9c9a192a2d352d46": {
+      "key_id": "9c9a192a2d352d46",
+      "key": "cswsQEU2yCzLSKYL6aasHg31mdgJGmAlpSFXI6hQM30=",
+      "fields": [
+        "skills"
+      ]
+    },
+    "bca3d0388e8de7a6": {
+      "key_id": "bca3d0388e8de7a6",
+      "key": "8hYHcEKnfIcLzSElmzSrI/i/Of7PYK5elPclajiw2kc=",
+      "fields": [
+        "phone"
+      ]
+    },
+    "d6a9d02649cce286": {
+      "key_id": "d6a9d02649cce286",
+      "key": "IBdKO2MMtbZIfZ5aQ1ZNIDcEwlh9SGmJclpleMvqb8g=",
+      "fields": [
+        "professional_summary"
+      ]
+    },
+    "e3f3eac2a130747c": {
+      "key_id": "e3f3eac2a130747c",
+      "key": "QRerHXJGFN9mL4d0ho8qqiR9IrKHCC3b0oimCeLdsbM=",
+      "fields": [
+        "patents"
+      ]
+    }
+  },
+  "field_map": {
+    "current_position": "607cf70c8d1f2d8b",
+    "education": "152ecb6a13ef1795",
+    "email": "0adaa3eb0dfd8141",
+    "languages": "9b047bc242bbd08c",
+    "linkedin": "22d0150ecbec0778",
+    "name": "6225ae8e11d4594b",
+    "patents": "e3f3eac2a130747c",
+    "phone": "bca3d0388e8de7a6",
+    "professional_summary": "d6a9d02649cce286",
+    "skills": "9c9a192a2d352d46"
+  }
+}

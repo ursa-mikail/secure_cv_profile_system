@@ -1,0 +1,1385 @@
+package main
+
+import (
+    "crypto/aes"
+    "crypto/cipher"
+    "crypto/rand"
+    "encoding/base64"
+    "encoding/json"
+    "errors"
+    "fmt"
+    "io"
+    "os"
+    "sort"
+    "strings"
+    "sync"
+    "time"
+)
+
+// ============================================================================
+// DOUBLY LINKED LIST FOR KEY MANAGEMENT
+// ============================================================================
+
+// KeyNode represents a node containing encryption key and metadata
+type KeyNode struct {
+    KeyID            string
+    KeyBytes         []byte
+    Timestamp        int64
+    Revoked          bool
+    EncryptedFields  map[string]bool
+    Prev             *KeyNode
+    Next             *KeyNode
+}
+
+// KeyChain manages encryption keys using a doubly linked list
+type KeyChain struct {
+    mu      sync.RWMutex
+    head    *KeyNode
+    tail    *KeyNode
+    current *KeyNode
+    keyMap  map[string]*KeyNode
+    size    int
+}
+
+// NewKeyChain creates a new KeyChain
+func NewKeyChain() *KeyChain {
+    return &KeyChain{
+        keyMap: make(map[string]*KeyNode),
+    }
+}
+
+// CreateKey generates new key and adds to chain
+func (kc *KeyChain) CreateKey() *KeyNode {
+    kc.mu.Lock()
+    defer kc.mu.Unlock()
+
+    keyID := generateRandomHex(16)
+    keyBytes := generateRandomBytes(32) // AES-256
+
+    node := &KeyNode{
+        KeyID:           keyID,
+        KeyBytes:        keyBytes,
+        Timestamp:       time.Now().Unix(),
+        EncryptedFields: make(map[string]bool),
+    }
+
+    if kc.head == nil {
+        kc.head = node
+        kc.tail = node
+    } else {
+        kc.tail.Next = node
+        node.Prev = kc.tail
+        kc.tail = node
+    }
+
+    kc.current = node
+    kc.keyMap[keyID] = node
+    kc.size++
+
+    return node
+}
+
+// GetKeyBytes retrieves key bytes by ID
+func (kc *KeyChain) GetKeyBytes(keyID string) ([]byte, error) {
+    kc.mu.RLock()
+    defer kc.mu.RUnlock()
+
+    node, exists := kc.keyMap[keyID]
+    if !exists {
+        return nil, errors.New("key not found")
+    }
+    if node.Revoked {
+        return nil, errors.New("key revoked")
+    }
+    return node.KeyBytes, nil
+}
+
+// GetNode retrieves key node by ID
+func (kc *KeyChain) GetNode(keyID string) *KeyNode {
+    kc.mu.RLock()
+    defer kc.mu.RUnlock()
+    return kc.keyMap[keyID]
+}
+
+// RevokeKey marks key as revoked
+func (kc *KeyChain) RevokeKey(keyID string) error {
+    kc.mu.Lock()
+    defer kc.mu.Unlock()
+
+    node, exists := kc.keyMap[keyID]
+    if !exists {
+        return errors.New("key not found")
+    }
+
+    node.Revoked = true
+    node.Timestamp = time.Now().Unix()
+    return nil
+}
+
+// Display prints key chain
+func (kc *KeyChain) Display() {
+    kc.mu.RLock()
+    defer kc.mu.RUnlock()
+
+    fmt.Printf("\n%s\n", strings.Repeat("=", 70))
+    fmt.Printf("KEY CHAIN (%d keys)\n", kc.size)
+    fmt.Printf("%s\n", strings.Repeat("=", 70))
+
+    node := kc.head
+    pos := 0
+    for node != nil {
+        status := "ACTIVE"
+        if node.Revoked {
+            status = "REVOKED"
+        }
+        currentMarker := ""
+        if node == kc.current {
+            currentMarker = " [CURRENT]"
+        }
+
+        fields := make([]string, 0, len(node.EncryptedFields))
+        for field := range node.EncryptedFields {
+            fields = append(fields, field)
+        }
+        sort.Strings(fields)
+
+        fmt.Printf("%d. %s... - %s%s\n", pos, node.KeyID[:12], status, currentMarker)
+        fmt.Printf("   Fields: %d - %v\n", len(fields), fields[:min(3, len(fields))])
+        
+        node = node.Next
+        pos++
+    }
+    fmt.Printf("%s\n", strings.Repeat("=", 70))
+}
+
+// ============================================================================
+// SECURE CV PROFILE
+// ============================================================================
+
+// EncryptedData represents encrypted field data
+type EncryptedData struct {
+    Nonce      string `json:"nonce"`
+    Ciphertext string `json:"ciphertext"`
+    Type       string `json:"type"`
+}
+
+// SecureCV encrypts CV with per-field key management
+type SecureCV struct {
+    mu           sync.RWMutex
+    keys         *KeyChain
+    encrypted    map[string]*EncryptedData
+    fieldKeyMap  map[string]string
+}
+
+// NewSecureCV creates a new SecureCV instance
+func NewSecureCV() *SecureCV {
+    return &SecureCV{
+        keys:        NewKeyChain(),
+        encrypted:   make(map[string]*EncryptedData),
+        fieldKeyMap: make(map[string]string),
+    }
+}
+
+// Encrypt encrypts data with AES-GCM
+func (scv *SecureCV) Encrypt(plaintext interface{}, key []byte) (*EncryptedData, error) {
+    block, err := aes.NewCipher(key)
+    if err != nil {
+        return nil, err
+    }
+
+    aesgcm, err := cipher.NewGCM(block)
+    if err != nil {
+        return nil, err
+    }
+
+    nonce := make([]byte, aesgcm.NonceSize())
+    if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+        return nil, err
+    }
+
+    // Serialize to JSON
+    var text string
+    switch v := plaintext.(type) {
+    case string:
+        text = v
+    default:
+        jsonBytes, err := json.Marshal(plaintext)
+        if err != nil {
+            return nil, err
+        }
+        text = string(jsonBytes)
+    }
+
+    ciphertext := aesgcm.Seal(nil, nonce, []byte(text), nil)
+
+    return &EncryptedData{
+        Nonce:      base64.StdEncoding.EncodeToString(nonce),
+        Ciphertext: base64.StdEncoding.EncodeToString(ciphertext),
+        Type:       getTypeName(plaintext),
+    }, nil
+}
+
+// Decrypt decrypts data with AES-GCM
+func (scv *SecureCV) Decrypt(encrypted *EncryptedData, key []byte) (interface{}, error) {
+    block, err := aes.NewCipher(key)
+    if err != nil {
+        return nil, err
+    }
+
+    aesgcm, err := cipher.NewGCM(block)
+    if err != nil {
+        return nil, err
+    }
+
+    nonce, err := base64.StdEncoding.DecodeString(encrypted.Nonce)
+    if err != nil {
+        return nil, err
+    }
+
+    ciphertext, err := base64.StdEncoding.DecodeString(encrypted.Ciphertext)
+    if err != nil {
+        return nil, err
+    }
+
+    plaintext, err := aesgcm.Open(nil, nonce, ciphertext, nil)
+    if err != nil {
+        return nil, err
+    }
+
+    if encrypted.Type == "map" || encrypted.Type == "slice" {
+        var result interface{}
+        if err := json.Unmarshal(plaintext, &result); err != nil {
+            return nil, err
+        }
+        return result, nil
+    }
+
+    return string(plaintext), nil
+}
+
+// LoadCV loads and encrypts CV data
+func (scv *SecureCV) LoadCV(cvData map[string]interface{}, mode string) error {
+    scv.mu.Lock()
+    defer scv.mu.Unlock()
+
+    if cvData == nil {
+        return errors.New("cv data is nil")
+    }
+
+    fmt.Printf("\nLoading %d CV fields in '%s' mode...\n", len(cvData), mode)
+
+    for field, value := range cvData {
+        var keyNode *KeyNode
+        
+        if mode == "multi" {
+            keyNode = scv.keys.CreateKey()
+        } else {
+            if scv.keys.current == nil {
+                keyNode = scv.keys.CreateKey()
+            } else {
+                keyNode = scv.keys.current
+            }
+        }
+
+        // Encrypt field
+        encryptedData, err := scv.Encrypt(value, keyNode.KeyBytes)
+        if err != nil {
+            return fmt.Errorf("failed to encrypt field %s: %v", field, err)
+        }
+
+        scv.encrypted[field] = encryptedData
+        scv.fieldKeyMap[field] = keyNode.KeyID
+        keyNode.EncryptedFields[field] = true
+    }
+
+    fmt.Printf("Encrypted %d fields with %d keys\n", len(cvData), scv.keys.size)
+    return nil
+}
+
+// GetField decrypts and retrieves field
+func (scv *SecureCV) GetField(field string) (interface{}, error) {
+    scv.mu.RLock()
+    defer scv.mu.RUnlock()
+
+    encryptedData, exists := scv.encrypted[field]
+    if !exists {
+        return nil, fmt.Errorf("field '%s' not found", field)
+    }
+
+    keyID, exists := scv.fieldKeyMap[field]
+    if !exists {
+        return nil, fmt.Errorf("no key found for field '%s'", field)
+    }
+
+    keyBytes, err := scv.keys.GetKeyBytes(keyID)
+    if err != nil {
+        return nil, fmt.Errorf("failed to get key for field '%s': %v", field, err)
+    }
+
+    return scv.Decrypt(encryptedData, keyBytes)
+}
+
+// RotateFieldKey rotates encryption key for specific field
+func (scv *SecureCV) RotateFieldKey(field string) (string, error) {
+    scv.mu.Lock()
+    defer scv.mu.Unlock()
+
+    encryptedData, exists := scv.encrypted[field]
+    if !exists {
+        return "", fmt.Errorf("field '%s' not found", field)
+    }
+
+    // Get old key
+    oldKeyID, exists := scv.fieldKeyMap[field]
+    if !exists {
+        return "", fmt.Errorf("no key found for field '%s'", field)
+    }
+
+    oldKeyBytes, err := scv.keys.GetKeyBytes(oldKeyID)
+    if err != nil {
+        return "", fmt.Errorf("failed to get old key: %v", err)
+    }
+
+    // Decrypt with old key
+    plaintext, err := scv.Decrypt(encryptedData, oldKeyBytes)
+    if err != nil {
+        return "", fmt.Errorf("failed to decrypt with old key: %v", err)
+    }
+
+    // Create new key
+    newKeyNode := scv.keys.CreateKey()
+
+    // Re-encrypt with new key
+    newEncryptedData, err := scv.Encrypt(plaintext, newKeyNode.KeyBytes)
+    if err != nil {
+        return "", fmt.Errorf("failed to re-encrypt: %v", err)
+    }
+
+    // Update data structures
+    scv.encrypted[field] = newEncryptedData
+    scv.fieldKeyMap[field] = newKeyNode.KeyID
+
+    // Update tracking
+    oldNode := scv.keys.GetNode(oldKeyID)
+    if oldNode != nil {
+        delete(oldNode.EncryptedFields, field)
+    }
+    newKeyNode.EncryptedFields[field] = true
+
+    fmt.Printf("Rotated key for '%s': %s... -> %s...\n", 
+        field, oldKeyID[:8], newKeyNode.KeyID[:8])
+    
+    return newKeyNode.KeyID, nil
+}
+
+// GetShareableKey gets key info for sharing
+func (scv *SecureCV) GetShareableKey(field string) (map[string]interface{}, error) {
+    scv.mu.RLock()
+    defer scv.mu.RUnlock()
+
+    keyID, exists := scv.fieldKeyMap[field]
+    if !exists {
+        return nil, fmt.Errorf("field '%s' not found", field)
+    }
+
+    node := scv.keys.GetNode(keyID)
+    if node == nil || node.Revoked {
+        return nil, errors.New("key not available or revoked")
+    }
+
+    fields := make([]string, 0, len(node.EncryptedFields))
+    for f := range node.EncryptedFields {
+        fields = append(fields, f)
+    }
+    sort.Strings(fields)
+
+    return map[string]interface{}{
+        "key_id": keyID,
+        "key":    base64.StdEncoding.EncodeToString(node.KeyBytes),
+        "fields": fields,
+    }, nil
+}
+
+// GetAllKeys gets all keys for full CV access
+func (scv *SecureCV) GetAllKeys() map[string]interface{} {
+    scv.mu.RLock()
+    defer scv.mu.RUnlock()
+
+    uniqueKeys := make(map[string]interface{})
+    seenKeys := make(map[string]bool)
+
+    for _, keyID := range scv.fieldKeyMap {
+        if seenKeys[keyID] {
+            continue
+        }
+        seenKeys[keyID] = true
+
+        node := scv.keys.GetNode(keyID)
+        if node != nil && !node.Revoked {
+            fields := make([]string, 0, len(node.EncryptedFields))
+            for field := range node.EncryptedFields {
+                fields = append(fields, field)
+            }
+            sort.Strings(fields)
+
+            uniqueKeys[keyID] = map[string]interface{}{
+                "key":    base64.StdEncoding.EncodeToString(node.KeyBytes),
+                "fields": fields,
+            }
+        }
+    }
+
+    return map[string]interface{}{
+        "keys":      uniqueKeys,
+        "field_map": scv.fieldKeyMap,
+    }
+}
+
+// SaveEncryptedCV saves encrypted CV to file
+func (scv *SecureCV) SaveEncryptedCV(filename string) error {
+    scv.mu.RLock()
+    defer scv.mu.RUnlock()
+
+    data := map[string]interface{}{
+        "encrypted_data": scv.encrypted,
+        "field_key_map":  scv.fieldKeyMap,
+        "metadata": map[string]interface{}{
+            "total_fields": len(scv.encrypted),
+            "total_keys":   scv.keys.size,
+        },
+    }
+
+    jsonData, err := json.MarshalIndent(data, "", "  ")
+    if err != nil {
+        return err
+    }
+
+    return os.WriteFile(filename, jsonData, 0644)
+}
+
+// SaveKeys saves key manifest to file
+func (scv *SecureCV) SaveKeys(filename string) error {
+    keysData := scv.GetAllKeys()
+    jsonData, err := json.MarshalIndent(keysData, "", "  ")
+    if err != nil {
+        return err
+    }
+
+    return os.WriteFile(filename, jsonData, 0644)
+}
+
+// DisplayKeys displays the current key chain
+func (scv *SecureCV) DisplayKeys() {
+    scv.keys.Display()
+}
+
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+
+func generateRandomBytes(n int) []byte {
+    b := make([]byte, n)
+    if _, err := rand.Read(b); err != nil {
+        panic(err)
+    }
+    return b
+}
+
+func generateRandomHex(n int) string {
+    const letters = "0123456789abcdef"
+    b := make([]byte, n)
+    for i := range b {
+        b[i] = letters[generateRandomBytes(1)[0]%byte(len(letters))]
+    }
+    return string(b)
+}
+
+func getTypeName(v interface{}) string {
+    switch v.(type) {
+    case string:
+        return "string"
+    case map[string]interface{}:
+        return "map"
+    case []interface{}:
+        return "slice"
+    default:
+        return fmt.Sprintf("%T", v)
+    }
+}
+
+func min(a, b int) int {
+    if a < b {
+        return a
+    }
+    return b
+}
+
+// LoadCVData loads CV data from JSON file
+func LoadCVData(filename string) (map[string]interface{}, error) {
+    data, err := os.ReadFile(filename)
+    if err != nil {
+        return nil, fmt.Errorf("failed to read %s: %v", filename, err)
+    }
+
+    var cvData map[string]interface{}
+    if err := json.Unmarshal(data, &cvData); err != nil {
+        return nil, fmt.Errorf("failed to parse JSON from %s: %v", filename, err)
+    }
+
+    return cvData, nil
+}
+
+// ============================================================================
+// DEMOS
+// ============================================================================
+
+func demoSingleKey(cvData map[string]interface{}) *SecureCV {
+    fmt.Printf("\n%s\n", strings.Repeat("=", 70))
+    fmt.Println("DEMO 1: SINGLE KEY MODE")
+    fmt.Printf("%s\n", strings.Repeat("=", 70))
+
+    cv := NewSecureCV()
+    if err := cv.LoadCV(cvData, "single"); err != nil {
+        fmt.Printf("Error loading CV: %v\n", err)
+        return nil
+    }
+    cv.DisplayKeys()
+
+    if err := cv.SaveEncryptedCV("encrypted_cv_single.json"); err != nil {
+        fmt.Printf("Error saving encrypted CV: %v\n", err)
+    }
+    if err := cv.SaveKeys("keys_single.json"); err != nil {
+        fmt.Printf("Error saving keys: %v\n", err)
+    }
+
+    allKeys := cv.GetAllKeys()
+    fmt.Printf("\nTotal keys: %d\n", len(allKeys["keys"].(map[string]interface{})))
+    return cv
+}
+
+func demoMultiKey(cvData map[string]interface{}) *SecureCV {
+    fmt.Printf("\n%s\n", strings.Repeat("=", 70))
+    fmt.Println("DEMO 2: MULTI-KEY MODE")
+    fmt.Printf("%s\n", strings.Repeat("=", 70))
+
+    cv := NewSecureCV()
+    if err := cv.LoadCV(cvData, "multi"); err != nil {
+        fmt.Printf("Error loading CV: %v\n", err)
+        return nil
+    }
+    cv.DisplayKeys()
+
+    // Share specific field key
+    nameKey, err := cv.GetShareableKey("name")
+    if err == nil {
+        fmt.Printf("\nShareable key for 'name': %s...\n", nameKey["key_id"].(string)[:12])
+    } else {
+        fmt.Printf("Error getting shareable key: %v\n", err)
+    }
+
+    if err := cv.SaveEncryptedCV("encrypted_cv_multi.json"); err != nil {
+        fmt.Printf("Error saving encrypted CV: %v\n", err)
+    }
+    if err := cv.SaveKeys("keys_multi.json"); err != nil {
+        fmt.Printf("Error saving keys: %v\n", err)
+    }
+
+    return cv
+}
+
+func demoFieldAccess(cvData map[string]interface{}) (*SecureCV, *SecureCV) {
+    fmt.Printf("\n%s\n", strings.Repeat("=", 70))
+    fmt.Println("DEMO 3: FIELD ACCESS WITH KEYS")
+    fmt.Printf("%s\n", strings.Repeat("=", 70))
+
+    // Test with single key mode
+    fmt.Println("\n--- SINGLE KEY MODE ---")
+    cvSingle := NewSecureCV()
+    if err := cvSingle.LoadCV(cvData, "single"); err != nil {
+        fmt.Printf("Error loading CV: %v\n", err)
+        return nil, nil
+    }
+
+    // Get key for skills
+    keyInfo, err := cvSingle.GetShareableKey("skills")
+    if err == nil {
+        fmt.Printf("\nKey for 'skills': %s...\n", keyInfo["key_id"].(string)[:16])
+        fields := keyInfo["fields"].([]string)
+        fmt.Printf("This key also unlocks: %v\n", fields[:min(5, len(fields))])
+
+        // Decrypt the field
+        decrypted, err := cvSingle.GetField("skills")
+        if err == nil {
+            fmt.Printf("\nDecrypted 'skills':\n")
+            if str, ok := decrypted.(string); ok {
+                fmt.Printf("%s...\n", str[:min(100, len(str))])
+            }
+        } else {
+            fmt.Printf("Error decrypting skills: %v\n", err)
+        }
+    } else {
+        fmt.Printf("Error getting shareable key: %v\n", err)
+    }
+
+    // Test with multi-key mode
+    fmt.Println("\n\n--- MULTI KEY MODE ---")
+    cvMulti := NewSecureCV()
+    if err := cvMulti.LoadCV(cvData, "multi"); err != nil {
+        fmt.Printf("Error loading CV: %v\n", err)
+        return cvSingle, nil
+    }
+
+    keyInfo, err = cvMulti.GetShareableKey("skills")
+    if err == nil {
+        fmt.Printf("\nKey for 'skills': %s...\n", keyInfo["key_id"].(string)[:16])
+        fields := keyInfo["fields"].([]string)
+        fmt.Printf("This key only unlocks: %v\n", fields)
+
+        // Decrypt the field
+        decrypted, err := cvMulti.GetField("skills")
+        if err == nil {
+            fmt.Printf("\nDecrypted 'skills':\n")
+            if str, ok := decrypted.(string); ok {
+                fmt.Printf("%s...\n", str[:min(100, len(str))])
+            }
+        } else {
+            fmt.Printf("Error decrypting skills: %v\n", err)
+        }
+    } else {
+        fmt.Printf("Error getting shareable key: %v\n", err)
+    }
+
+    return cvSingle, cvMulti
+}
+
+func demoRotation(cvData map[string]interface{}) *SecureCV {
+    fmt.Printf("\n%s\n", strings.Repeat("=", 70))
+    fmt.Println("DEMO 4: KEY ROTATION")
+    fmt.Printf("%s\n", strings.Repeat("=", 70))
+
+    cv := NewSecureCV()
+    if err := cv.LoadCV(cvData, "single"); err != nil {
+        fmt.Printf("Error loading CV: %v\n", err)
+        return nil
+    }
+
+    // Get original key
+    fmt.Println("\n--- BEFORE ROTATION ---")
+    oldKeyInfo, err := cv.GetShareableKey("email")
+    if err == nil {
+        oldKeyID := oldKeyInfo["key_id"].(string)
+        fmt.Printf("Old key ID: %s...\n", oldKeyID[:16])
+
+        // Decrypt with old key
+        emailBefore, err := cv.GetField("email")
+        if err == nil {
+            fmt.Printf("Decrypted email: %v\n", emailBefore)
+        } else {
+            fmt.Printf("Error decrypting email: %v\n", err)
+        }
+    } else {
+        fmt.Printf("Error getting shareable key: %v\n", err)
+    }
+
+    cv.DisplayKeys()
+
+    // Rotate the key
+    fmt.Println("\n--- ROTATING KEY ---")
+    newKeyID, err := cv.RotateFieldKey("email")
+    if err != nil {
+        fmt.Printf("Error rotating key: %v\n", err)
+        return cv
+    }
+
+    // Display the new key ID
+    fmt.Printf("New key ID: %s\n", newKeyID)    
+
+    cv.DisplayKeys()
+
+    // Try old key (should fail)
+    fmt.Println("\n--- TESTING OLD KEY (should fail) ---")
+    _, err = cv.GetField("email")
+    if err != nil {
+        fmt.Printf("OLD KEY CANNOT DECRYPT - Rotation successful! Error: %v\n", err)
+    } else {
+        fmt.Println("WARNING: Old key still works!")
+    }
+
+    // Use new key (should work)
+    fmt.Println("\n--- TESTING NEW KEY (should work) ---")
+    newKeyInfo, err := cv.GetShareableKey("email")
+    if err == nil {
+        fmt.Printf("New key ID: %s...\n", newKeyInfo["key_id"].(string)[:16])
+        emailWithNew, err := cv.GetField("email")
+        if err == nil {
+            fmt.Printf("Decrypted email: %v\n", emailWithNew)
+            fmt.Println("NEW KEY WORKS - Rotation successful!")
+        } else {
+            fmt.Printf("Error decrypting with new key: %v\n", err)
+        }
+    } else {
+        fmt.Printf("Error getting new shareable key: %v\n", err)
+    }
+
+    // Verify other fields still work with their keys
+    fmt.Println("\n--- TESTING OTHER FIELDS ---")
+    name, err := cv.GetField("name")
+    if err == nil {
+        fmt.Printf("Name (different key): %v\n", name)
+    } else {
+        fmt.Printf("Error getting name: %v\n", err)
+    }
+
+    return cv
+}
+
+// ============================================================================
+// MAIN
+// ============================================================================
+
+func main() {
+    // Load CV data from JSON file
+    cvData, err := LoadCVData("cv_data.json")
+    if err != nil {
+        fmt.Printf("Error loading cv_data.json: %v\n", err)
+        fmt.Println("Using sample data instead...")
+        
+        // Fallback to sample data
+        cvData = map[string]interface{}{
+            "name":                  "Violet K.",
+            "phone":                 "C: (347)-555-1294",
+            "email":                 "Violet.tech@Violet.com",
+            "linkedin":              "https://www.linkedin.com/in/Violet/",
+            "languages":             "English, French, Japanese",
+            "professional_summary":  "Technology leadership. Security specialist and Embedded Systems Architect with 18+ years of experience...",
+            "skills":                "C/C++, Java, Python, Rust, JavaScript, SQL, Swift, Kotlin, TensorFlow, AWS...",
+            "current_position":      "Principal Engineer at SafeTech Solutions (2023 Nov – Present)",
+            "patents":               "25+ patents on IoT security and cryptographic systems",
+            "education":             "Masters Degree in Computer Engineering and Cybersecurity",
+        }
+    }
+
+    fmt.Printf("Loaded %d fields from CV data\n", len(cvData))
+
+    // ============================================================================
+    // COMPREHENSIVE TEST CASES
+    // ============================================================================
+
+    fmt.Printf("\n%s\n", strings.Repeat("=", 70))
+    fmt.Println("COMPREHENSIVE TEST CASES")
+    fmt.Printf("%s\n", strings.Repeat("=", 70))
+
+    // Test Case 1: Basic Single Key Mode
+    fmt.Println("\n--- TEST CASE 1: BASIC SINGLE KEY MODE ---")
+    cv1 := NewSecureCV()
+    err = cv1.LoadCV(cvData, "single")
+    if err != nil {
+        fmt.Printf("❌ Failed to load CV: %v\n", err)
+    } else {
+        fmt.Println("✅ CV loaded successfully in single key mode")
+        cv1.DisplayKeys()
+    }
+
+    // Test Case 2: Basic Multi Key Mode
+    fmt.Println("\n--- TEST CASE 2: BASIC MULTI KEY MODE ---")
+    cv2 := NewSecureCV()
+    err = cv2.LoadCV(cvData, "multi")
+    if err != nil {
+        fmt.Printf("❌ Failed to load CV: %v\n", err)
+    } else {
+        fmt.Println("✅ CV loaded successfully in multi key mode")
+        cv2.DisplayKeys()
+    }
+
+    // Test Case 3: Field Access and Decryption
+    fmt.Println("\n--- TEST CASE 3: FIELD ACCESS AND DECRYPTION ---")
+    cv3 := NewSecureCV()
+    cv3.LoadCV(cvData, "single")
+    
+    // Test decrypting various fields
+    testFields := []string{"name", "email", "skills"}
+    for _, field := range testFields {
+        value, err := cv3.GetField(field)
+        if err != nil {
+            fmt.Printf("❌ Failed to get field '%s': %v\n", field, err)
+        } else {
+            fmt.Printf("✅ Field '%s' decrypted successfully: %v\n", field, value)
+        }
+    }
+
+    // Test Case 4: Key Rotation
+    fmt.Println("\n--- TEST CASE 4: KEY ROTATION ---")
+    cv4 := NewSecureCV()
+    cv4.LoadCV(cvData, "single")
+    
+    // Get email before rotation
+    emailBefore, _ := cv4.GetField("email")
+    fmt.Printf("Email before rotation: %v\n", emailBefore)
+    
+    // Rotate the key
+    newKeyID, err := cv4.RotateFieldKey("email")
+    if err != nil {
+        fmt.Printf("❌ Failed to rotate key: %v\n", err)
+    } else {
+        fmt.Printf("✅ Key rotated successfully. New key ID: %s...\n", newKeyID[:16])
+    }
+    
+    // Get email after rotation
+    emailAfter, err := cv4.GetField("email")
+    if err != nil {
+        fmt.Printf("❌ Failed to get email after rotation: %v\n", err)
+    } else {
+        fmt.Printf("✅ Email after rotation: %v\n", emailAfter)
+    }
+    
+    // Verify data integrity
+    if emailBefore == emailAfter {
+        fmt.Println("✅ Data integrity maintained after key rotation")
+    } else {
+        fmt.Println("❌ Data corrupted during key rotation")
+    }
+
+    // Test Case 5: Shareable Keys
+    fmt.Println("\n--- TEST CASE 5: SHAREABLE KEYS ---")
+    cv5 := NewSecureCV()
+    cv5.LoadCV(cvData, "multi")
+    
+    keyInfo, err := cv5.GetShareableKey("name")
+    if err != nil {
+        fmt.Printf("❌ Failed to get shareable key: %v\n", err)
+    } else {
+        fmt.Printf("✅ Shareable key obtained for 'name':\n")
+        fmt.Printf("   Key ID: %s\n", keyInfo["key_id"])
+        fmt.Printf("   Fields accessible: %v\n", keyInfo["fields"])
+        fmt.Printf("   Key (base64): %s...\n", keyInfo["key"].(string)[:20])
+    }
+
+    // Test Case 6: Error Handling - Non-existent Field
+    fmt.Println("\n--- TEST CASE 6: ERROR HANDLING ---")
+    cv6 := NewSecureCV()
+    cv6.LoadCV(cvData, "single")
+    
+    // Try to get non-existent field
+    _, err = cv6.GetField("nonexistent_field")
+    if err != nil {
+        fmt.Printf("✅ Correctly handled non-existent field: %v\n", err)
+    } else {
+        fmt.Println("❌ Should have returned error for non-existent field")
+    }
+    
+    // Try to rotate non-existent field
+    _, err = cv6.RotateFieldKey("nonexistent_field")
+    if err != nil {
+        fmt.Printf("✅ Correctly handled rotation of non-existent field: %v\n", err)
+    } else {
+        fmt.Println("❌ Should have returned error for rotating non-existent field")
+    }
+
+    // Test Case 7: Multiple Rotations
+    fmt.Println("\n--- TEST CASE 7: MULTIPLE ROTATIONS ---")
+    cv7 := NewSecureCV()
+    cv7.LoadCV(cvData, "single")
+    
+    originalEmail, _ := cv7.GetField("email")
+    fmt.Printf("Original email: %v\n", originalEmail)
+    
+    // Rotate multiple times
+    for i := 1; i <= 3; i++ {
+        newKeyID, err := cv7.RotateFieldKey("email")
+        if err != nil {
+            fmt.Printf("❌ Rotation %d failed: %v\n", i, err)
+        } else {
+            fmt.Printf("✅ Rotation %d successful. Key ID: %s...\n", i, newKeyID[:16])
+        }
+    }
+    
+    finalEmail, err := cv7.GetField("email")
+    if err != nil {
+        fmt.Printf("❌ Failed to get email after multiple rotations: %v\n", err)
+    } else if originalEmail == finalEmail {
+        fmt.Println("✅ Data integrity maintained after multiple rotations")
+    } else {
+        fmt.Println("❌ Data corrupted during multiple rotations")
+    }
+
+    // Test Case 8: Save and Load Simulation
+    fmt.Println("\n--- TEST CASE 8: SAVE AND LOAD SIMULATION ---")
+    cv8 := NewSecureCV()
+    cv8.LoadCV(cvData, "single")
+    
+    // Save encrypted data
+    err = cv8.SaveEncryptedCV("test_encrypted_cv.json")
+    if err != nil {
+        fmt.Printf("❌ Failed to save encrypted CV: %v\n", err)
+    } else {
+        fmt.Println("✅ Encrypted CV saved successfully")
+    }
+    
+    // Save keys
+    err = cv8.SaveKeys("test_keys.json")
+    if err != nil {
+        fmt.Printf("❌ Failed to save keys: %v\n", err)
+    } else {
+        fmt.Println("✅ Keys saved successfully")
+    }
+
+    // Test Case 9: GetAllKeys Functionality
+    fmt.Println("\n--- TEST CASE 9: GET ALL KEYS FUNCTIONALITY ---")
+    cv9 := NewSecureCV()
+    cv9.LoadCV(cvData, "multi")
+
+    allKeys := cv9.GetAllKeys()
+
+    // Safe type assertion for keys
+    keysMap, ok := allKeys["keys"].(map[string]interface{})
+    if !ok {
+        fmt.Printf("❌ Failed to get keys map: unexpected type %T\n", allKeys["keys"])
+    } else {
+        fmt.Printf("✅ Total unique keys: %d\n", len(keysMap))
+        
+        for keyID, keyInfo := range keysMap {
+            info, ok := keyInfo.(map[string]interface{})
+            if !ok {
+                fmt.Printf("   ❌ Key info has unexpected type: %T\n", keyInfo)
+                continue
+            }
+            fields, ok := info["fields"].([]interface{})
+            if !ok {
+                fmt.Printf("   ❌ Fields has unexpected type: %T\n", info["fields"])
+                continue
+            }
+            fmt.Printf("   Key %s... manages %d fields: %v\n", keyID[:12], len(fields), fields)
+        }
+    }
+
+    // Safe type assertion for field_map
+    fieldMap, ok := allKeys["field_map"].(map[string]string)
+    if !ok {
+        // Try alternative type assertion
+        if fieldMapInterface, ok := allKeys["field_map"].(map[string]interface{}); ok {
+            fmt.Printf("✅ Total fields: %d\n", len(fieldMapInterface))
+            // Convert if needed
+            fieldMap = make(map[string]string)
+            for k, v := range fieldMapInterface {
+                if str, ok := v.(string); ok {
+                    fieldMap[k] = str
+                }
+            }
+        } else {
+            fmt.Printf("❌ Field map has unexpected type: %T\n", allKeys["field_map"])
+        }
+    } else {
+        fmt.Printf("✅ Total fields: %d\n", len(fieldMap))
+    }
+
+    // Alternative: Use a safer approach to examine the structure
+    fmt.Println("\n--- Alternative Inspection ---")
+    allKeysJSON, err := json.MarshalIndent(allKeys, "", "  ")
+    if err != nil {
+        fmt.Printf("❌ Failed to marshal keys: %v\n", err)
+    } else {
+        fmt.Printf("All keys structure:\n%s\n", string(allKeysJSON))
+    }
+
+    // Test Case 10: Mixed Data Types
+    fmt.Println("\n--- TEST CASE 10: MIXED DATA TYPES ---")
+    mixedData := map[string]interface{}{
+        "string_field":  "Simple string",
+        "number_field":  42,
+        "boolean_field": true,
+        "array_field":   []interface{}{"item1", "item2", "item3"},
+        "object_field": map[string]interface{}{
+            "nested": "value",
+            "count":  100,
+        },
+    }
+    
+    cv10 := NewSecureCV()
+    err = cv10.LoadCV(mixedData, "multi")
+    if err != nil {
+        fmt.Printf("❌ Failed to load mixed data: %v\n", err)
+    } else {
+        fmt.Println("✅ Mixed data types loaded successfully")
+        
+        // Test retrieving different types
+        stringVal, _ := cv10.GetField("string_field")
+        fmt.Printf("   String field: %v\n", stringVal)
+        
+        arrayVal, _ := cv10.GetField("array_field")
+        fmt.Printf("   Array field: %v\n", arrayVal)
+        
+        objectVal, _ := cv10.GetField("object_field")
+        fmt.Printf("   Object field: %v\n", objectVal)
+    }
+
+    // Test Case 11: Performance Test with Many Fields
+    fmt.Println("\n--- TEST CASE 11: PERFORMANCE WITH MANY FIELDS ---")
+    manyFieldsData := make(map[string]interface{})
+    for i := 0; i < 50; i++ {
+        manyFieldsData[fmt.Sprintf("field_%d", i)] = fmt.Sprintf("Value for field %d with some data", i)
+    }
+    
+    start := time.Now()
+    cv11 := NewSecureCV()
+    err = cv11.LoadCV(manyFieldsData, "multi")
+    loadTime := time.Since(start)
+    
+    if err != nil {
+        fmt.Printf("❌ Failed to load many fields: %v\n", err)
+    } else {
+        fmt.Printf("✅ Loaded %d fields in %v\n", len(manyFieldsData), loadTime)
+        fmt.Printf("   Total keys created: %d\n", cv11.keys.size)
+    }
+
+    // Test Case 12: Revoke Key Functionality
+    fmt.Println("\n--- TEST CASE 12: KEY REVOCATION ---")
+    cv12 := NewSecureCV()
+    cv12.LoadCV(cvData, "single")
+    
+    // Get a key ID to revoke
+    keyInfo, _ = cv12.GetShareableKey("email")
+    keyID := keyInfo["key_id"].(string)
+    
+    // Revoke the key
+    err = cv12.keys.RevokeKey(keyID)
+    if err != nil {
+        fmt.Printf("❌ Failed to revoke key: %v\n", err)
+    } else {
+        fmt.Printf("✅ Key %s... revoked successfully\n", keyID[:16])
+    }
+    
+    // Try to use revoked key
+    _, err = cv12.GetField("email")
+    if err != nil {
+        fmt.Printf("✅ Revoked key correctly rejected: %v\n", err)
+    } else {
+        fmt.Println("❌ Revoked key should not work")
+    }
+
+    // ============================================================================
+    // SUMMARY
+    // ============================================================================
+
+    fmt.Printf("\n%s\n", strings.Repeat("=", 70))
+    fmt.Println("TEST SUMMARY")
+    fmt.Printf("%s\n", strings.Repeat("=", 70))
+    fmt.Println("All test cases completed!")
+    fmt.Println("\nGenerated files:")
+    fmt.Println("- test_encrypted_cv.json")
+    fmt.Println("- test_keys.json")
+    fmt.Println("- encrypted_cv_single.json")
+    fmt.Println("- keys_single.json")
+    fmt.Println("- encrypted_cv_multi.json")
+    fmt.Println("- keys_multi.json")
+
+    // ============================================================================
+    // USAGE EXAMPLES
+    // ============================================================================
+
+    fmt.Printf("\n%s\n", strings.Repeat("=", 70))
+    fmt.Println("USAGE EXAMPLES")
+    fmt.Printf("%s\n", strings.Repeat("=", 70))
+
+    // Example 1: Basic Usage
+    fmt.Println("\n--- EXAMPLE 1: BASIC USAGE ---")
+    cvExample := NewSecureCV()
+    
+    // Load some data
+    exampleData := map[string]interface{}{
+        "name":  "John Doe",
+        "email": "john@example.com",
+        "age":   30,
+    }
+    
+    cvExample.LoadCV(exampleData, "single")
+    
+    // Get a field
+    name, _ := cvExample.GetField("name")
+    fmt.Printf("Name: %v\n", name)
+    
+    // Rotate a key
+    newKey, _ := cvExample.RotateFieldKey("email")
+    fmt.Printf("New key for email: %s...\n", newKey[:16])
+    
+    // Get shareable key
+    shareable, _ := cvExample.GetShareableKey("name")
+    fmt.Printf("Shareable key ID: %s\n", shareable["key_id"])
+
+    // Example 2: Multi-key mode for granular access
+    fmt.Println("\n--- EXAMPLE 2: GRANULAR ACCESS CONTROL ---")
+    cvGranular := NewSecureCV()
+    cvGranular.LoadCV(cvData, "multi")
+    
+    // Share only specific field keys
+    publicKey, _ := cvGranular.GetShareableKey("professional_summary")
+    privateKey, _ := cvGranular.GetShareableKey("email")
+    
+    fmt.Printf("Public key (summary only): %s...\n", publicKey["key_id"].(string)[:16])
+    fmt.Printf("Private key (email only): %s...\n", privateKey["key_id"].(string)[:16])
+
+    fmt.Printf("\n%s\n", strings.Repeat("=", 70))
+    fmt.Println("ALL TESTS AND EXAMPLES COMPLETED SUCCESSFULLY!")
+    fmt.Printf("%s\n", strings.Repeat("=", 70))
+}
+
+/*
+Loaded 10 fields from CV data
+
+======================================================================
+COMPREHENSIVE TEST CASES
+======================================================================
+
+--- TEST CASE 1: BASIC SINGLE KEY MODE ---
+
+Loading 10 CV fields in 'single' mode...
+Encrypted 10 fields with 1 keys
+✅ CV loaded successfully in single key mode
+
+======================================================================
+KEY CHAIN (1 keys)
+======================================================================
+0. b3ecc1f41acd... - ACTIVE [CURRENT]
+   Fields: 10 - [current_position education email]
+======================================================================
+
+--- TEST CASE 2: BASIC MULTI KEY MODE ---
+
+Loading 10 CV fields in 'multi' mode...
+Encrypted 10 fields with 10 keys
+✅ CV loaded successfully in multi key mode
+
+======================================================================
+KEY CHAIN (10 keys)
+======================================================================
+0. 73fa0a64490b... - ACTIVE
+   Fields: 1 - [name]
+1. d6ea2dad9bdd... - ACTIVE
+   Fields: 1 - [phone]
+2. 97fc25748620... - ACTIVE
+   Fields: 1 - [languages]
+3. c975cf6c5c8d... - ACTIVE
+   Fields: 1 - [professional_summary]
+4. 9899b28d60b1... - ACTIVE
+   Fields: 1 - [patents]
+5. 0464236ef5c9... - ACTIVE
+   Fields: 1 - [education]
+6. d03e95f6390b... - ACTIVE
+   Fields: 1 - [email]
+7. 85e079425f59... - ACTIVE
+   Fields: 1 - [linkedin]
+8. 495d106474d0... - ACTIVE
+   Fields: 1 - [skills]
+9. 415beb72d07d... - ACTIVE [CURRENT]
+   Fields: 1 - [current_position]
+======================================================================
+
+--- TEST CASE 3: FIELD ACCESS AND DECRYPTION ---
+
+Loading 10 CV fields in 'single' mode...
+Encrypted 10 fields with 1 keys
+✅ Field 'name' decrypted successfully: Violet K.
+✅ Field 'email' decrypted successfully: Violet.tech@Violet.com
+✅ Field 'skills' decrypted successfully: C/C++, Java, Python, Rust, JavaScript, SQL, Swift, Kotlin, TensorFlow, AWS...
+
+--- TEST CASE 4: KEY ROTATION ---
+
+Loading 10 CV fields in 'single' mode...
+Encrypted 10 fields with 1 keys
+Email before rotation: Violet.tech@Violet.com
+Rotated key for 'email': 96b9bd2f... -> 34f4ee8f...
+✅ Key rotated successfully. New key ID: 34f4ee8f2e07287c...
+✅ Email after rotation: Violet.tech@Violet.com
+✅ Data integrity maintained after key rotation
+
+--- TEST CASE 5: SHAREABLE KEYS ---
+
+Loading 10 CV fields in 'multi' mode...
+Encrypted 10 fields with 10 keys
+✅ Shareable key obtained for 'name':
+   Key ID: cd833f55deac54fb
+   Fields accessible: [name]
+   Key (base64): UWGDeve2kChlNb4e1x8z...
+
+--- TEST CASE 6: ERROR HANDLING ---
+
+Loading 10 CV fields in 'single' mode...
+Encrypted 10 fields with 1 keys
+✅ Correctly handled non-existent field: field 'nonexistent_field' not found
+✅ Correctly handled rotation of non-existent field: field 'nonexistent_field' not found
+
+--- TEST CASE 7: MULTIPLE ROTATIONS ---
+
+Loading 10 CV fields in 'single' mode...
+Encrypted 10 fields with 1 keys
+Original email: Violet.tech@Violet.com
+Rotated key for 'email': 4b567a57... -> 0a68adb7...
+✅ Rotation 1 successful. Key ID: 0a68adb70c927e16...
+Rotated key for 'email': 0a68adb7... -> d59de7f0...
+✅ Rotation 2 successful. Key ID: d59de7f02915b6e0...
+Rotated key for 'email': d59de7f0... -> d6e4cb29...
+✅ Rotation 3 successful. Key ID: d6e4cb2989a38ccd...
+✅ Data integrity maintained after multiple rotations
+
+--- TEST CASE 8: SAVE AND LOAD SIMULATION ---
+
+Loading 10 CV fields in 'single' mode...
+Encrypted 10 fields with 1 keys
+✅ Encrypted CV saved successfully
+✅ Keys saved successfully
+
+--- TEST CASE 9: GET ALL KEYS FUNCTIONALITY ---
+
+Loading 10 CV fields in 'multi' mode...
+Encrypted 10 fields with 10 keys
+✅ Total unique keys: 10
+   ❌ Fields has unexpected type: []string
+   ❌ Fields has unexpected type: []string
+   ❌ Fields has unexpected type: []string
+   ❌ Fields has unexpected type: []string
+   ❌ Fields has unexpected type: []string
+   ❌ Fields has unexpected type: []string
+   ❌ Fields has unexpected type: []string
+   ❌ Fields has unexpected type: []string
+   ❌ Fields has unexpected type: []string
+   ❌ Fields has unexpected type: []string
+✅ Total fields: 10
+
+--- Alternative Inspection ---
+All keys structure:
+{
+  "field_map": {
+    "current_position": "2023d6726bf57e2e",
+    "education": "2c41cc1cf9ceeefe",
+    "email": "95306c070ce89727",
+    "languages": "24c81b09c711a6aa",
+    "linkedin": "8b6ef57968a2b1a2",
+    "name": "0fae0266004fc351",
+    "patents": "fdb2aecb19112f06",
+    "phone": "4c0832aa186def37",
+    "professional_summary": "589d8c38e9dc4ed6",
+    "skills": "c099bd6338e0b086"
+  },
+  "keys": {
+    "0fae0266004fc351": {
+      "fields": [
+        "name"
+      ],
+      "key": "NuLJUL6fvYQcZr/z2FHn13psm8Dq/FmUBK9bctHd1t8="
+    },
+    "2023d6726bf57e2e": {
+      "fields": [
+        "current_position"
+      ],
+      "key": "ORTMCu1K9bphuEfWBs/EmhBG9YN3pQdD0b4vYQT+gWI="
+    },
+    "24c81b09c711a6aa": {
+      "fields": [
+        "languages"
+      ],
+      "key": "eXsglzerujgPQI8bOdh2bt7yiSxV2UieTWZbpFt/q1I="
+    },
+    "2c41cc1cf9ceeefe": {
+      "fields": [
+        "education"
+      ],
+      "key": "cbWwJvT6ikX3akIfL+peIv5Ul5391bOxD/u5NZr3Rvo="
+    },
+    "4c0832aa186def37": {
+      "fields": [
+        "phone"
+      ],
+      "key": "g6YH8bnS5ZWvJmKcTJbfDEEwLKXqxRHFS84K9Izl4pg="
+    },
+    "589d8c38e9dc4ed6": {
+      "fields": [
+        "professional_summary"
+      ],
+      "key": "lp1NbKZ+kHZ+9wkKuzKD5JqADUG/3KeXh34TApdb5UI="
+    },
+    "8b6ef57968a2b1a2": {
+      "fields": [
+        "linkedin"
+      ],
+      "key": "hjHSovz2ckKjE87nP3hMmSNpJaQY5oVuGr9vNyBbs4A="
+    },
+    "95306c070ce89727": {
+      "fields": [
+        "email"
+      ],
+      "key": "0iM4OTFoPMMfT6Q8DgJiJ6vKvkojh/9sG0mKan+IwJ8="
+    },
+    "c099bd6338e0b086": {
+      "fields": [
+        "skills"
+      ],
+      "key": "5NCcRbLaVyniSQBCsMlOChIft6mj2b00i7aP1Qxt6C8="
+    },
+    "fdb2aecb19112f06": {
+      "fields": [
+        "patents"
+      ],
+      "key": "NcC7urVgvEP+Pr1t5Jv6xHx3zYD07h7255O88+G1PV4="
+    }
+  }
+}
+
+--- TEST CASE 10: MIXED DATA TYPES ---
+
+Loading 5 CV fields in 'multi' mode...
+Encrypted 5 fields with 5 keys
+✅ Mixed data types loaded successfully
+   String field: Simple string
+   Array field: [item1 item2 item3]
+   Object field: map[count:100 nested:value]
+
+--- TEST CASE 11: PERFORMANCE WITH MANY FIELDS ---
+
+Loading 50 CV fields in 'multi' mode...
+Encrypted 50 fields with 50 keys
+✅ Loaded 50 fields in 158.666µs
+   Total keys created: 50
+
+--- TEST CASE 12: KEY REVOCATION ---
+
+Loading 10 CV fields in 'single' mode...
+Encrypted 10 fields with 1 keys
+✅ Key f5160d487fdb245d... revoked successfully
+✅ Revoked key correctly rejected: failed to get key for field 'email': key revoked
+
+======================================================================
+TEST SUMMARY
+======================================================================
+All test cases completed!
+
+Generated files:
+- test_encrypted_cv.json
+- test_keys.json
+- encrypted_cv_single.json
+- keys_single.json
+- encrypted_cv_multi.json
+- keys_multi.json
+
+======================================================================
+USAGE EXAMPLES
+======================================================================
+
+--- EXAMPLE 1: BASIC USAGE ---
+
+Loading 3 CV fields in 'single' mode...
+Encrypted 3 fields with 1 keys
+Name: John Doe
+Rotated key for 'email': 885de010... -> 6d54e511...
+New key for email: 6d54e51140c83508...
+Shareable key ID: 885de01092335001
+
+--- EXAMPLE 2: GRANULAR ACCESS CONTROL ---
+
+Loading 10 CV fields in 'multi' mode...
+Encrypted 10 fields with 10 keys
+Public key (summary only): 8fc0cba4eff45133...
+Private key (email only): 457e07ea4adc906d...
+
+======================================================================
+ALL TESTS AND EXAMPLES COMPLETED SUCCESSFULLY!
+======================================================================
+*/

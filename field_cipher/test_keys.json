@@ -1,0 +1,32 @@
+{
+  "keys": {
+    "c24eaf5a53fa5d13": {
+      "key_id": "c24eaf5a53fa5d13",
+      "key": "aFK7f6QvcXVwVZG1TETcKz4GpV6QTt+T+4DXWXJZ8Yw=",
+      "fields": [
+        "current_position",
+        "education",
+        "email",
+        "languages",
+        "linkedin",
+        "name",
+        "patents",
+        "phone",
+        "professional_summary",
+        "skills"
+      ]
+    }
+  },
+  "field_map": {
+    "current_position": "c24eaf5a53fa5d13",
+    "education": "c24eaf5a53fa5d13",
+    "email": "c24eaf5a53fa5d13",
+    "languages": "c24eaf5a53fa5d13",
+    "linkedin": "c24eaf5a53fa5d13",
+    "name": "c24eaf5a53fa5d13",
+    "patents": "c24eaf5a53fa5d13",
+    "phone": "c24eaf5a53fa5d13",
+    "professional_summary": "c24eaf5a53fa5d13",
+    "skills": "c24eaf5a53fa5d13"
+  }
+}

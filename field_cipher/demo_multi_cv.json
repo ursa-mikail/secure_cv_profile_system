@@ -1,0 +1,70 @@
+{
+  "encrypted_data": {
+    "current_position": {
+      "nonce": "gmHR2WBHxG/75/XF",
+      "ciphertext": "TFWqhNX9fZ7xH/sMRxYTEDg2N9bhGsaFogTkfMIO/UL2MsM+oQSsHgKnYduNtxUP1+oGtHQttx2s5y281hprXgokwPXF/OWzIkVwTdkiCw==",
+      "type": "string"
+    },
+    "education": {
+      "nonce": "+WWpZrXMR9QxbhlB",
+      "ciphertext": "3l1JgenANjiyBHyJKGabGY+2+7VSs8R5f0WWs2s8AMF+yzxlHKtnoV/d32bkSZb/Tm/5wtt1X4bgWJGWyuXFhC7jygpEk4Wa",
+      "type": "string"
+    },
+    "email": {
+      "nonce": "1OZ5R7hoUgd2jPrx",
+      "ciphertext": "YPn2+bhsCwBKsS6prYWZZRXEhH17u7eN2F8H+94M2lbcyPBQzv4=",
+      "type": "string"
+    },
+    "languages": {
+      "nonce": "mxeCL9JPlORQ6cZC",
+      "ciphertext": "uz9PCYEygICmEd1Rm5FM5BFWSGL9KkLXPunkZWj0rFLpH8weqRz10Ck=",
+      "type": "string"
+    },
+    "linkedin": {
+      "nonce": "bR9YiMisSY/DFfS+",
+      "ciphertext": "LzSb3QA/FQFLBhPRSSpCfxIzf6oK3Y0LRwIWhwCS/C/RkNGAD2boiwpB5VwqlHin9Oom",
+      "type": "string"
+    },
+    "name": {
+      "nonce": "DymfgIj3Pobx3OZr",
+      "ciphertext": "WAE6CAGYRSj6khNAWOed9iml8HWMLbEQmw==",
+      "type": "string"
+    },
+    "patents": {
+      "nonce": "ypPGzGG79X47eWGe",
+      "ciphertext": "s38ZZLPnPHmHwNCBiN3qFYoWy/jwgfiFDmKeYJB2MW32+MfVXrVIoNx2yFalC/w1Wgbo2L0UPT2//4dX3E0xMXpkQlqv",
+      "type": "string"
+    },
+    "phone": {
+      "nonce": "wa/V/CCNMyZijazr",
+      "ciphertext": "egr7PU/p5HRbtjJjtrlzVnry+Hvlzl3in9EMr2GKe1F2",
+      "type": "string"
+    },
+    "professional_summary": {
+      "nonce": "uRwkb7pvupJ3GYUO",
+      "ciphertext": "ZgNHx068I8BQVvv721dXvtjqer3BmzwbtPOWZcCqde9+1w5YqS+BuWi2F1nKnwswfpZCFvm/3T3r6ZHn+ygKEtndjyPp1T+MZGOXLW8P8JgFgjQq8eApIQCwLy9IxFZm5xOL9v3/FqGPF9W3DLTG+Pe13tdpsixg0A==",
+      "type": "string"
+    },
+    "skills": {
+      "nonce": "V74WWHImuEHG2324",
+      "ciphertext": "Gy6dHtzRmIC+cJ9VqsAJA/upUCbUbEq2dWBc4A2uhTW1/wU3TUCgMkM3h9WxCLi8Rf8sIfPU+M3/fbhQlNcyZrl5JMQkdXhBeaQX4TuKSrjP08B/m1EShuYFWpm/",
+      "type": "string"
+    }
+  },
+  "field_key_map": {
+    "current_position": "607cf70c8d1f2d8b",
+    "education": "152ecb6a13ef1795",
+    "email": "0adaa3eb0dfd8141",
+    "languages": "9b047bc242bbd08c",
+    "linkedin": "22d0150ecbec0778",
+    "name": "6225ae8e11d4594b",
+    "patents": "e3f3eac2a130747c",
+    "phone": "bca3d0388e8de7a6",
+    "professional_summary": "d6a9d02649cce286",
+    "skills": "9c9a192a2d352d46"
+  },
+  "metadata": {
+    "total_fields": 10,
+    "total_keys": 10
+  }
+}
